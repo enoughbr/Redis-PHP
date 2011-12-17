@@ -18,12 +18,22 @@ class RedisTest extends PHPUnit_Framework_TestCase {
     
     function testSet() {
         $this->a->set('foo','foobar');
+        
         $this->assertEquals( $this->a->get('foo') , 'foobar' );
         
         $this->a->del('foo');
         $this->assertEquals( $this->a->get('foo') , false );
         
         $this->assertEquals( $this->a->get('no_isset_key') , false);
+    }
+    
+    function testSerializateSetGet() {
+        $this->a->flush();
+        
+        $this->a->sset( 'foo' , array(1,2,3) );
+        $data = $this->a->sget('foo');
+        
+        $this->assertTrue( count( array_diff(array(1,2,3), $data)) == 0 );
     }
     
     
@@ -62,7 +72,88 @@ class RedisTest extends PHPUnit_Framework_TestCase {
         $this->a->move( 'key', 1);
         $this->a->select(1);
         $this->assertTrue( $this->a->exists('key') );
+        $this->a->select(0);
     }
     
+    function testPaternKey() {
+        $this->a->flush();
+        
+        $this->a->set('foo',1);
+        $this->a->set('foa',2);
+        $this->a->set('integer4',3);
+        
+        $keys = $this->a->keys('fo[ao]');
+        $this->assertTrue( count( array_diff( array('foo','foa'), $keys) ) == 0);
+        
+        $keys = $this->a->keys('fo[osd]');
+        $this->assertTrue( count( array_diff( array('foo'), $keys) ) == 0);
+        $this->a->flush();
+    }
+    
+    function testSmget() {
+        $this->a->sset('s1', 'data');
+        $this->a->sset('s2', 'data1');
+        $this->a->sset('s3', 'data2');
+        
+        $data = $this->a->smget(array('s1','s2','s3','s4'));
+        
+        $this->assertEquals( $data['s1'] , 'data');
+        $this->assertEquals( $data['s2'] , 'data1');
+        $this->assertEquals( $data['s3'] , 'data2');
+        $this->assertEquals( $data['s4'] , false);
+        
+        $this->a->flush();
+        
+        $this->a->set('s1', 'data');
+        $this->a->set('s2', 'data1');
+        $this->a->set('s3', 'data2');
+        
+        $data = $this->a->mget(array('s1','s2','s3','s4'));
+        
+        $this->assertEquals( $data['s1'] , 'data');
+        $this->assertEquals( $data['s2'] , 'data1');
+        $this->assertEquals( $data['s3'] , 'data2');
+        $this->assertEquals( $data['s4'] , false);
+        
+        $this->a->flush();
+    }
+    
+    function testGetSet() {
+        $this->a->sset('s1','data');
+        $old_data = $this->a->sgetset('s1','newdata');
+        $this->assertEquals( $old_data , 'data');
+        
+        $this->a->del('s1');
+        
+        $this->a->set('s1','olddata');
+        $old_data = $this->a->getset('s1','new_data');
+        $this->assertEquals( $old_data , 'olddata');
+    }
+    
+    
+    function testIncAppStr() {
+        $this->a->set('weather','connect to system');
+        $resp = $this->a->sub_string('weather',0,10);
+        $this->assertEquals( $resp, 'connect to ');
+        $this->a->flush_all();
+        
+        $this->a->set('inc',10);
+        $this->assertEquals( $this->a->incr('inc') , 11 );
+        $this->assertEquals( $this->a->incr('inc',2) , 13 );
+        
+        $this->assertEquals( $this->a->decr('inc') , 12 );
+        $this->assertEquals( $this->a->decr('inc',2) , 10 );
+        
+        $this->a->flush();
+    }
+    
+    
+    function testSave() {
+        $this->a->flush();
+        
+        $this->a->save();
+        $this->assertEquals( $this->a->lastsave(), date('U') );
+    }
+    
+    
 }
-

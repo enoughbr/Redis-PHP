@@ -3,15 +3,12 @@
  * Copyright (c) 2011, Lucenko Viacheslav <admin at forum-game dot org>
  * All rights reserved.
  *
- * Redistribution and use in source and binary forms, with or without
+ * Redistribution and use in source, with or without
  * modification, are permitted provided that the following conditions are met:
  *
  *   * Redistributions of source code must retain the above copyright notice,
  *     this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in the
- *     documentation and/or other materials provided with the distribution.
- *   * Neither the name of Redis nor the names of its contributors may be used
+ *   * Neither the name of Redis-PHP nor the names of its contributors may be used
  *     to endorse or promote products derived from this software without
  *     specific prior written permission.
  *
@@ -271,25 +268,50 @@ class RedisPHP {
         return $this->int_bool_reply($resp);
     }
     
+    /**
+     * Gets all the keys that match the pattern
+     * 
+     * @params string $patern
+     * @return array
+     */
+    public function keys($pattern)
+    {
+        $resp = $this->send_message('KEYS '.$pattern);
+        $data = explode("\r\n",$resp);
+        
+        array_pop($data);
+        $nums = substr(array_shift($data),1);
+        
+        $keys = array();
+        foreach($data as $key => $val) {
+            if( $key % 2 )
+                $keys[] = $val;
+        }
+        
+        return $keys;
+    }
+    
     #########################################################################
     #------------- THIS IS FUNCTIONS TO WORK WITH STRING KEYS --------------#
     #########################################################################
     
     /**
-     * Set new key into db
+     * Insert new serializate key
      * 
      * @param string $key
      * @param mixed $value
      * @return void
      */
-    public function sset( $key , $value ) 
+    public function sset( $key , $value , $expire = false) 
     {
         $data = serialize($value);
-        $this->send_message('SET '.$key.' '.strlen($data)."\n".$data);
+        $this->send_message('SET '.$key.' '.strlen($data)."\r\n".$data);
+        if( $expire )
+            $this->expire($key, $expire);
     }
     
     /**
-     * Get key
+     * Get serializate key
      * 
      * @param string $key
      * @return mixed
@@ -298,7 +320,7 @@ class RedisPHP {
     {
         $response = $this->send_message("GET $key");
         
-        list($numb, $data) = explode("\n",$response);
+        list($numb, $data) = explode("\r\n",$response);
         
         if( empty($data) )
             return false;
@@ -317,9 +339,11 @@ class RedisPHP {
      * @param string $value
      * @return void
      */
-    public function set( $key , $value ) 
+    public function set( $key , $value, $expire = false ) 
     {
         $this->send_message('SET '.$key.' '.strlen($value)."\n".$value);
+        if( $expire )
+            $this->expire($key, $expire);
     }
     
     /**
@@ -332,15 +356,176 @@ class RedisPHP {
     {
         $response = $this->send_message("GET $key");
         
-        list($numb, $data) = explode("\n",$response);
+        list($numb, $data) = explode("\r\n",$response);
+
+        if( empty($data) )
+            return false;
+        
+        return $data;
+    }
+    
+    
+    /**
+     * Serializate multi get
+     * 
+     * @param array $keys
+     * @return array
+     */
+    public function smget($mkey)
+    {
+        $resp = $this->send_message('MGET '.implode(' ',$mkey));
+        
+        $data = explode("\r\n",$resp);
+        
+        array_pop($data);
+        $nums = substr(array_shift($data),1);
+        
+        $keys = array();
+        $iterate = 0;
+        foreach($data as $key => $val) {
+            
+            if( $key % 2 ) {
+                $keys[ $mkey[$iterate++] ] = @unserialize($val);
+            }
+        }
+        
+        for( $i = 0; $i < count($mkey); $i++)
+            if( !isset($keys[ $mkey[$i] ]) )
+                $keys[ $mkey[$i] ] = false;
+        
+        return $keys;
+    }
+    
+    /**
+     * Multy get
+     * 
+     * @param array $keys
+     * @return array
+     */
+    public function mget($mkey)
+    {
+        $resp = $this->send_message('MGET '.implode(' ',$mkey));
+        
+        $data = explode("\r\n",$resp);
+        
+        array_pop($data);
+        $nums = substr(array_shift($data),1);
+        
+        $keys = array();
+        $iterate = 0;
+        foreach($data as $key => $val) {
+            
+            if( $key % 2 ) {
+                $keys[ $mkey[$iterate++] ] = $val;
+            }
+        }
+        
+        for( $i = 0; $i < count($mkey); $i++)
+            if( !isset($keys[ $mkey[$i] ]) )
+                $keys[ $mkey[$i] ] = false;
+        
+        return $keys;
+    }
+    
+    /**
+     * Serializate GET and after SET
+     * 
+     * @param string $key
+     * @param mixed $value
+     * @return mixed
+     */
+    public function sgetset($key, $value)
+    {
+        $data = serialize($value);
+        $resp = $this->send_message('GETSET '.$key.' '.strlen($data)."\r\n".$data);
+        
+        list($numb, $data) = explode("\r\n",$resp);
+        
+        if( empty($data) )
+            return false;
+        
+        if($items = @unserialize($data))
+            return $items;
+        else
+            return $data;
+    }
+
+    /**
+     * GET and after SET
+     * 
+     * @param string $key
+     * @param string $value
+     * @return string
+     */
+    public function getset($key, $value)
+    {
+        $data = serialize($value);
+        $resp = $this->send_message('GETSET '.$key.' '.strlen($data)."\r\n".$data);
+        
+        list($numb, $data) = explode("\r\n",$resp);
         
         if( empty($data) )
             return false;
         
         return $data;
     }
+    
+    /**
+     * Increment method
+     * 
+     * @param string $key
+     * @param integer $num
+     * @return integer - new data
+     */
+    public function incr($key,$num=0)
+    {
+        $query = 'INCR'.( $num ? 'BY ' : ' ').$key.' '.($num?$num:'' );
+        $new_value = $this->send_message($query);
+        return str_replace("\r\n",'',substr($new_value,1));
+    }
 
+    /**
+     * Decrement method
+     * 
+     * @param string $key
+     * @param integer $num
+     * @return integer - new data
+     */
+    public function decr($key,$num=0)
+    {
+        $query = 'DECR'.( $num ? 'BY ' : ' ').$key.' '.($num ? $num : '' );
+        $new_value = $this->send_message($query);
+        return str_replace("\r\n",'',substr($new_value,1));
+    }
 
+    /**
+     * Append string
+     * 
+     * @param string $key
+     * @param string $value
+     * @return void
+     */
+    public function append($key, $value)
+    {
+        $this->send_message('APPEND '.$key.' '.strlen($value)."\r\n".$value);
+    }
+    
+    /**
+     * Return sub string from key
+     * 
+     * @param string $key
+     * @param integer $start
+     * @param integer $end
+     * @return string
+     */
+    public function sub_string($key, $start, $end = 100000)
+    {
+        $resp = $this->send_message('SUBSTR '.$key.' '.$start.' '.$end);
+        list($numbet, $data) = explode("\r\n",$resp);
+        return $data;
+    }
+    
+    
     ########################################################################
     #------------------------SYSTEM METHODS -------------------------------#
     ########################################################################
@@ -356,6 +541,76 @@ class RedisPHP {
         $this->error = '';
         return empty($error) ? false : $error;
     }
+    
+    /**
+     * Save all data in database
+     * 
+     * @param boolean $async
+     * @return void
+     */
+    public function save($async = true)
+    {
+        if( $async )
+            $this->send_message('BGSAVE');
+        else
+            $this->send_message('SAVE');
+    }
+    
+    /**
+     * Return last save time
+     * 
+     * @return void
+     */
+    public function lastsave()
+    {
+        return str_replace("\r\n",'',substr( $this->send_message('LASTSAVE') , 1));
+    }
+    
+    /**
+     * Transaction start
+     * 
+     * @return void
+     */
+    public function multi()
+    {
+        $this->send_message('MULTI');
+    }
+    
+    /**
+     * Exec transaction
+     * 
+     * @return void
+     */
+    public function exec()
+    {
+        $this->send_message('EXEC');
+    }
+    
+    /**
+     * Create condition to transaction
+     * 
+     * @return void
+     */
+    public function watch( $keys = array() )
+    {
+        if( $keys )
+            $this->send_message('WATCH '.implode(' ',$keys) );
+        else
+            $this->send_message('UNWATCH');
+    }
+    
+    /**
+     * Resets the queue and completes the transaction
+     * 
+     * @return void
+     */
+    public function discard()
+    {
+        $this->send_message('DISCARD');
+    }
+    
+    
+    
     
     ########################################################################
     #---------------------------- PRIVATE METHOD  -------------------------#
@@ -451,7 +706,7 @@ class RedisPHP {
             $this->connect();
         
         if( $this->server ) {
-            fputs( $this->server , $message . "\r\n" );
+            fputs( $this->server , $message . "\n\n" );
             
             if( $this->socket_block )
                 fclose($this->server);
